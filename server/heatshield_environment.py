@@ -52,7 +52,6 @@ class EpisodeRuntime:
     inspection_log: List[str] = field(default_factory=list)
     last_event: str = ""
     last_error: str | None = None
-    grader_report: GraderReport | None = None
 
     def copy_dispatch_totals(self) -> Dict[str, int]:
         return {
@@ -83,7 +82,6 @@ class HeatShieldEnvironment(Environment):
             )
         else:
             runtime.last_event = f"Ready for task {task_id}."
-        runtime.grader_report = self._grade(runtime)
         return runtime
 
     def reset(self, task_id: str | None = None) -> HeatShieldObservation:
@@ -158,7 +156,7 @@ class HeatShieldEnvironment(Environment):
         )
 
     def _grade(self, runtime: EpisodeRuntime) -> GraderReport:
-        runtime.grader_report = grade_plan(
+        return grade_plan(
             runtime.scenario,
             active_facility_ids=runtime.active_facilities,
             inspected_targets=runtime.inspected_targets,
@@ -166,7 +164,6 @@ class HeatShieldEnvironment(Environment):
             alert_messages=runtime.alert_messages,
             invalid_actions=runtime.invalid_actions,
         )
-        return runtime.grader_report
 
     def _handle_inspect(self, runtime: EpisodeRuntime, action: HeatShieldAction) -> None:
         target_id = action.target_id
@@ -189,7 +186,7 @@ class HeatShieldEnvironment(Environment):
             runtime.inspection_log = runtime.inspection_log[-8:]
             runtime.last_event = f"Inspection completed for {target_id}."
         else:
-            runtime.last_event = f"No new intel for {target_id}; it was already inspected."
+            self._mark_invalid(runtime, f"inspection_already_completed:{target_id}")
 
     def _handle_activate(self, runtime: EpisodeRuntime, action: HeatShieldAction) -> None:
         facility = runtime.scenario.facilities.get(action.target_id)
@@ -241,6 +238,9 @@ class HeatShieldEnvironment(Environment):
         if not message:
             self._mark_invalid(runtime, "alert_requires_message")
             return
+        if target_id in runtime.alert_messages:
+            self._mark_invalid(runtime, f"alert_already_sent:{target_id}")
+            return
         runtime.alert_messages[target_id] = message
         target_label = "all districts" if target_id == "all" else runtime.scenario.districts[target_id].label
         runtime.last_event = f"Broadcast alert sent to {target_label}."
@@ -248,7 +248,9 @@ class HeatShieldEnvironment(Environment):
     def _facility_blocked(self, runtime: EpisodeRuntime, facility: FacilityScenario) -> bool:
         if not facility.requires_generator:
             return False
-        generators_available = runtime.resource_dispatches["generator"].get(facility.district_id, 0)
+        generators_available = runtime.resource_dispatches.get("generator", {}).get(
+            facility.district_id, 0
+        )
         generators_in_use = sum(
             1
             for facility_id in runtime.active_facilities
@@ -271,7 +273,7 @@ class HeatShieldEnvironment(Environment):
                 label=district.label,
                 population=district.population,
                 heat_index_c=district.heat_index_c,
-                priority=district.priority,  # type: ignore[arg-type]
+                priority=district.priority,
                 vulnerability=district.vulnerability,
                 unmet_relief=round(self._district_unmet_relief(runtime, district), 2),
                 power_outage=self._district_has_power_issue(runtime, district),
@@ -294,7 +296,7 @@ class HeatShieldEnvironment(Environment):
         ]
         resource_pool = [
             ResourceSnapshot(
-                resource_type=resource_type,  # type: ignore[arg-type]
+                resource_type=resource_type,
                 available=runtime.resource_remaining.get(resource_type, 0),
                 impact_per_unit=impact,
             )
@@ -318,7 +320,7 @@ class HeatShieldEnvironment(Environment):
             action_history=list(runtime.action_history),
             last_event=runtime.last_event,
             recommended_next_actions=self._build_recommendations(runtime, turns_remaining),
-            grader_summary=report.summary_lines,
+            grader_summary=list(report.summary_lines),
             score_breakdown=report.score_breakdown,
             done=done,
             reward=reward,
@@ -398,12 +400,12 @@ class HeatShieldEnvironment(Environment):
         return recommendations[:4]
 
     def _district_has_power_issue(self, runtime: EpisodeRuntime, district: DistrictScenario) -> bool:
-        if district.district_id in {"rivergate", "clinic_belt", "inland_towers", "creekside"}:
-            return True
-        return any(
-            facility.requires_generator and facility.district_id == district.district_id
-            for facility in runtime.scenario.facilities.values()
-        )
+        return district.power_outage
+
+    def close(self) -> None:
+        """Environment uses in-memory state only and has nothing to tear down."""
+
+        return None
 
     def _facility_status(
         self, runtime: EpisodeRuntime, facility: FacilityScenario

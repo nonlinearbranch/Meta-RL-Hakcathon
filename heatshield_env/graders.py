@@ -1,7 +1,7 @@
 """Deterministic graders for HeatShield."""
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Set
+from typing import Dict, Iterable, Mapping, Set
 
 from .models import ScoreBreakdown
 from .scenario_data import RESOURCE_IMPACTS, DistrictScenario, FacilityScenario, TaskScenario
@@ -12,7 +12,7 @@ class GraderReport:
     """Structured grading report."""
 
     score_breakdown: ScoreBreakdown
-    summary_lines: List[str]
+    summary_lines: tuple[str, ...]
 
 
 def _message_matches_keywords(message: str, keywords: Iterable[str]) -> bool:
@@ -93,8 +93,7 @@ def grade_plan(
         sum(
             1.0
             for district in alert_targets
-            if district.district_id in alert_messages
-            or ("all" in alert_messages and district.district_id not in alert_messages)
+            if district.district_id in alert_messages or "all" in alert_messages
         )
         / len(alert_targets)
         if alert_targets
@@ -145,4 +144,7 @@ def grade_plan(
     if invalid_actions:
         summary_lines.append(f"Penalty applied for invalid actions: -{penalty_score:.2f}")
 
-    return GraderReport(score_breakdown=score_breakdown, summary_lines=summary_lines)
+    return GraderReport(
+        score_breakdown=score_breakdown,
+        summary_lines=tuple(summary_lines),
+    )

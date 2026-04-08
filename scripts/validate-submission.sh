@@ -20,7 +20,9 @@ echo "Space: $PING_URL"
 echo
 
 echo "[1/4] Checking Space reset endpoint"
-HTTP_CODE="$(curl -s -o /tmp/heatshield-reset.out -w "%{http_code}" -X POST \
+RESET_OUT="$(mktemp)"
+trap 'rm -f "$RESET_OUT"' EXIT
+HTTP_CODE="$(curl -s -o "$RESET_OUT" -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" -d '{}' \
   "$PING_URL/reset" --max-time 30 || printf "000")"
 

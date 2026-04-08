@@ -7,11 +7,11 @@ This file intentionally follows the required START/STEP/END stdout contract.
 import asyncio
 import json
 import os
-import re
 import sys
 from typing import Dict, List, Optional
 
 from openai import OpenAI
+from pydantic import ValidationError
 
 from heatshield_env import HeatShieldAction, HeatShieldEnv, get_task_ids
 from heatshield_env.scenario_data import get_task
@@ -27,8 +27,6 @@ MAX_MODEL_TOKENS = 480
 TEMPERATURE = 0.2
 USE_LLM = os.getenv("USE_LLM", "false").lower() in {"1", "true", "yes"}
 
-ACTION_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-
 
 SYSTEM_PROMPT = """
 You are the operations planner for a city heat-response desk.
@@ -36,7 +34,7 @@ Return exactly one JSON object with these keys:
 - action_type: one of inspect, activate_center, dispatch_resource, broadcast_alert, finalize
 - target_id: a valid district or facility id from the prompt, or "mission" when finalizing
 - resource_type: one of cooling_bus, water_truck, medical_team, generator, or null
-- quantity: integer 0-4
+- quantity: integer 1-4
 - message: alert text or final summary; empty string when unused
 
 Rules:
@@ -298,18 +296,22 @@ def heuristic_action(observation) -> HeatShieldAction:
     return HeatShieldAction(
         action_type="finalize",
         target_id="mission",
-        message="Response stabilized. Finalizing the current HeatShield action plan.",
+        message=f"{observation.task_title} stabilized. Finalizing the current response plan.",
     )
 
 
 def extract_json(response_text: str) -> Optional[Dict]:
-    match = ACTION_JSON_RE.search(response_text)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(response_text):
+        if char != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(response_text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
 
 
 def validate_model_action(payload: Dict, observation) -> Optional[HeatShieldAction]:
@@ -327,33 +329,45 @@ def validate_model_action(payload: Dict, observation) -> Optional[HeatShieldActi
 
     target_id = str(payload.get("target_id", "")).strip()
     resource_type = payload.get("resource_type")
-    quantity = int(payload.get("quantity", 1) or 0)
+    try:
+        quantity = int(payload.get("quantity", 1))
+    except (TypeError, ValueError):
+        return None
     message = str(payload.get("message", "") or "")
 
     available = metadata.get("available_targets", {})
     valid_districts = set(available.get("districts", []))
     valid_facilities = set(available.get("facilities", []))
     valid_resources = set(available.get("resource_types", []))
+    resource_remaining = metadata.get("resource_remaining", {})
 
     if action_type == "inspect" and target_id not in (valid_districts | valid_facilities | valid_resources):
         return None
     if action_type == "activate_center" and target_id not in valid_facilities:
         return None
     if action_type == "dispatch_resource":
-        if target_id not in valid_districts or resource_type not in valid_resources or quantity <= 0:
+        if (
+            target_id not in valid_districts
+            or resource_type not in valid_resources
+            or quantity <= 0
+            or quantity > int(resource_remaining.get(resource_type, 0))
+        ):
             return None
     if action_type == "broadcast_alert" and target_id not in (valid_districts | {"all"}):
         return None
     if action_type == "finalize":
         target_id = "mission"
 
-    return HeatShieldAction(
-        action_type=action_type,
-        target_id=target_id,
-        resource_type=resource_type,
-        quantity=max(0, quantity),
-        message=message.strip(),
-    )
+    try:
+        return HeatShieldAction(
+            action_type=action_type,
+            target_id=target_id,
+            resource_type=resource_type,
+            quantity=quantity,
+            message=message.strip(),
+        )
+    except ValidationError:
+        return None
 
 
 def call_model(client: Optional[OpenAI], observation) -> Optional[HeatShieldAction]:

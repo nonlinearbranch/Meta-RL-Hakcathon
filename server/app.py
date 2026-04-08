@@ -66,21 +66,33 @@ class HTTPSessionManager:
         self._lock = RLock()
 
     def _close_record(self, record: HTTPSessionRecord) -> None:
-        try:
-            record.env.close()
-        except Exception:
-            pass
+        with record.lock:
+            try:
+                record.env.close()
+            except Exception:
+                pass
 
     def _prune_stale_sessions(self) -> None:
         now = time.monotonic()
-        stale_ids = [
-            session_id
-            for session_id, record in self._sessions.items()
-            if now - record.last_used_at > self._idle_ttl_s
-        ]
-        for session_id in stale_ids:
-            record = self._sessions.pop(session_id)
-            self._close_record(record)
+        stale_records: list[HTTPSessionRecord] = []
+        for session_id, record in list(self._sessions.items()):
+            if now - record.last_used_at <= self._idle_ttl_s:
+                continue
+            if not record.lock.acquire(blocking=False):
+                continue
+            removed = self._sessions.pop(session_id, None)
+            if removed is None:
+                record.lock.release()
+                continue
+            stale_records.append(record)
+
+        for record in stale_records:
+            try:
+                record.env.close()
+            except Exception:
+                pass
+            finally:
+                record.lock.release()
 
     def _require_record(self, session_id: str | None) -> tuple[str, HTTPSessionRecord]:
         if not session_id:
@@ -92,6 +104,8 @@ class HTTPSessionManager:
         with self._lock:
             self._prune_stale_sessions()
             record = self._sessions.get(session_id)
+            if record is not None:
+                record.last_used_at = time.monotonic()
 
         if record is None:
             raise HTTPException(
@@ -110,6 +124,8 @@ class HTTPSessionManager:
 
             if session_id:
                 record = self._sessions.get(session_id)
+                if record is not None:
+                    record.last_used_at = time.monotonic()
             else:
                 session_id = str(uuid4())
                 record = None

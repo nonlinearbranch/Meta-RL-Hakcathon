@@ -1,17 +1,20 @@
 """Scenario registry for HeatShield."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from types import MappingProxyType
+from typing import Dict, Mapping, List, Tuple
 
-from .models import Difficulty, TaskSummary
+from .models import Difficulty, Priority, ResourceType, TaskSummary
 
 
-RESOURCE_IMPACTS: Dict[str, float] = {
-    "cooling_bus": 5.0,
-    "water_truck": 3.0,
-    "medical_team": 4.0,
-    "generator": 0.0,
-}
+RESOURCE_IMPACTS: Mapping[ResourceType, float] = MappingProxyType(
+    {
+        "cooling_bus": 5.0,
+        "water_truck": 3.0,
+        "medical_team": 4.0,
+        "generator": 0.0,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -20,9 +23,10 @@ class DistrictScenario:
     label: str
     population: int
     heat_index_c: int
-    priority: str
+    priority: Priority
     vulnerability: float
     relief_target: float
+    power_outage: bool
     must_alert: bool
     public_notes: str
     secret_notes: str
@@ -52,11 +56,16 @@ class TaskScenario:
     public_situation_report: str
     max_steps: int
     success_threshold: float
-    resource_pool: Dict[str, int]
-    districts: Dict[str, DistrictScenario]
-    facilities: Dict[str, FacilityScenario]
+    resource_pool: Mapping[str, int]
+    districts: Mapping[str, DistrictScenario]
+    facilities: Mapping[str, FacilityScenario]
     priority_intel_targets: Tuple[str, ...]
     playbook: Tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "resource_pool", MappingProxyType(dict(self.resource_pool)))
+        object.__setattr__(self, "districts", MappingProxyType(dict(self.districts)))
+        object.__setattr__(self, "facilities", MappingProxyType(dict(self.facilities)))
 
 
 TASKS: Dict[str, TaskScenario] = {
@@ -92,6 +101,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="critical",
                 vulnerability=0.95,
                 relief_target=15.0,
+                power_outage=True,
                 must_alert=True,
                 public_notes=(
                     "Dense senior population near the ferry terminal. Outdoor queues are stretching into direct sun."
@@ -109,6 +119,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="high",
                 vulnerability=0.75,
                 relief_target=9.0,
+                power_outage=False,
                 must_alert=False,
                 public_notes=(
                     "Street vendors are still operating, but there is strong foot traffic and limited shade."
@@ -193,6 +204,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="critical",
                 vulnerability=0.98,
                 relief_target=14.0,
+                power_outage=True,
                 must_alert=True,
                 public_notes="Patient overflow is spilling outdoors near two outpatient clinics.",
                 secret_notes="The triage tent is the single highest-value activation, but it needs generator support.",
@@ -206,6 +218,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="high",
                 vulnerability=0.86,
                 relief_target=12.0,
+                power_outage=False,
                 must_alert=True,
                 public_notes="Outdoor lines at the ferry plaza are exposing families and shift workers.",
                 secret_notes="Old Port performs well once its recreation center is paired with one field resource.",
@@ -219,6 +232,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="high",
                 vulnerability=0.67,
                 relief_target=10.0,
+                power_outage=False,
                 must_alert=False,
                 public_notes="Commuters are stuck in a metal-heavy transit concourse with poor airflow.",
                 secret_notes="The station hall is worth activating once the two higher-risk districts are covered.",
@@ -312,6 +326,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="critical",
                 vulnerability=0.99,
                 relief_target=16.0,
+                power_outage=True,
                 must_alert=True,
                 public_notes="High-rise seniors are sheltering in stairwells after rolling elevator outages.",
                 secret_notes="Generator-backed indoor cooling is essential; mobile assets alone are not enough.",
@@ -325,6 +340,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="critical",
                 vulnerability=0.88,
                 relief_target=13.0,
+                power_outage=False,
                 must_alert=True,
                 public_notes="Commuters are stalled in an exposed transfer area with little shade.",
                 secret_notes="A fast indoor activation plus hydration support quickly changes the rail score.",
@@ -338,6 +354,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="high",
                 vulnerability=0.74,
                 relief_target=11.0,
+                power_outage=False,
                 must_alert=False,
                 public_notes="Shipyard workers are walking to the library branch for relief.",
                 secret_notes="Harbor North does not need an alert as much as it needs capacity.",
@@ -351,6 +368,7 @@ TASKS: Dict[str, TaskScenario] = {
                 priority="high",
                 vulnerability=0.78,
                 relief_target=10.0,
+                power_outage=True,
                 must_alert=True,
                 public_notes="Families are clustering near a clinic overflow lane after a breaker trip.",
                 secret_notes="A generator plus one medical or hydration asset stabilizes Creekside.",
@@ -426,8 +444,13 @@ TASKS: Dict[str, TaskScenario] = {
 
 def get_task(task_id: str) -> TaskScenario:
     """Return one task scenario."""
-
-    return TASKS[task_id]
+    try:
+        return TASKS[task_id]
+    except KeyError as exc:
+        available = ", ".join(get_task_ids())
+        raise KeyError(
+            f"Unknown task_id '{task_id}'. Available tasks: {available}"
+        ) from exc
 
 
 def get_task_ids() -> List[str]:

@@ -64,7 +64,7 @@ class ScoreBreakdown(BaseModel):
     facility_score: float = Field(..., ge=0.0, le=1.0)
     alert_score: float = Field(..., ge=0.0, le=1.0)
     intel_score: float = Field(..., ge=0.0, le=1.0)
-    penalty_score: float = Field(..., ge=0.0, le=1.0)
+    penalty_score: float = Field(..., ge=0.0, le=0.2)
     total_score: float = Field(..., ge=0.0, le=1.0)
 
 
@@ -90,7 +90,7 @@ class HeatShieldAction(Action):
         default=None, description="Resource used for dispatch_resource"
     )
     quantity: int = Field(
-        default=1, ge=0, le=4, description="Units to dispatch for dispatch_resource"
+        default=1, ge=1, le=4, description="Units to dispatch for dispatch_resource"
     )
     message: str = Field(default="", description="Alert copy or final summary")
 
@@ -109,8 +109,14 @@ class HeatShieldObservation(Observation):
     district_snapshots: List[DistrictSnapshot] = Field(default_factory=list)
     facility_snapshots: List[FacilitySnapshot] = Field(default_factory=list)
     resource_pool: List[ResourceSnapshot] = Field(default_factory=list)
-    inspection_log: List[str] = Field(default_factory=list)
-    action_history: List[str] = Field(default_factory=list)
+    inspection_log: List[str] = Field(
+        default_factory=list,
+        description="Rolling log of the last 8 successful inspections.",
+    )
+    action_history: List[str] = Field(
+        default_factory=list,
+        description="Rolling log of the last 8 executed actions.",
+    )
     last_event: str = Field(default="", description="Human-readable result of the last action")
     recommended_next_actions: List[str] = Field(default_factory=list)
     grader_summary: List[str] = Field(default_factory=list)
