@@ -23,7 +23,7 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 BENCHMARK = "heatshield_env"
-MAX_MODEL_TOKENS = 220
+MAX_MODEL_TOKENS = 480
 TEMPERATURE = 0.2
 USE_LLM = os.getenv("USE_LLM", "false").lower() in {"1", "true", "yes"}
 
@@ -414,7 +414,7 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
         observation = result.observation
         threshold = get_task(task_id).success_threshold
 
-        while not result.done and steps_taken < observation.step_limit:
+        while not result.done and observation.turns_remaining > 0:
             steps_taken += 1
             action = call_model(client, observation) or heuristic_action(observation)
             result = await env.step(action)
