@@ -9,68 +9,87 @@ tags:
   - logistics
 ---
 
-# HeatShield: Urban Heat Response Command
+# HeatShield
 
-HeatShield is a real-world OpenEnv environment where an AI agent acts as a city heat-response commander during a cascading heatwave emergency. The agent must inspect operational intel, activate cooling centers, dispatch scarce field resources, send direct alerts, and finalize a response plan under a tight step budget.
+HeatShield is an OpenEnv environment about urban heat emergency response.
+The agent plays the role of an operations lead: open cooling centers, send
+alerts, move limited field resources, and decide when to stop.
 
-The environment is designed for agentic RL rather than a toy benchmark:
-- The state is multi-district and resource-constrained.
-- Rewards provide partial progress signals after every useful action.
-- Hidden intel changes which actions are actually high leverage.
-- Three tasks scale from manageable corridor activation to city-wide cascading outages.
+I built this as a practical benchmark rather than a toy game. The core idea is
+simple: useful actions should help a little right away, bad sequencing should
+hurt overall mission quality, and the hard task should force tradeoffs.
 
-## Tasks
+## What is in here
 
-| Task ID | Difficulty | Goal |
+There are three tasks:
+
+| Task ID | Difficulty | Scenario |
 |---|---|---|
-| `cooling_corridor_easy` | Easy | Recover a two-district cooling corridor after a localized grid wobble. |
-| `blackout_triage_medium` | Medium | Balance a clinic corridor blackout with waterfront and transit pressure. |
-| `cascade_hard` | Hard | Coordinate four districts during simultaneous blackout, clinic, and commuter failures. |
+| `cooling_corridor_easy` | Easy | Recover a two-district corridor after a local grid wobble. |
+| `blackout_triage_medium` | Medium | Balance a clinic blackout with waterfront and transit pressure. |
+| `cascade_hard` | Hard | Handle four districts during a broader heatwave cascade. |
 
-Each task includes a deterministic grader that returns a normalized score in `[0.0, 1.0]`.
+Each task has:
+- a deterministic scenario definition
+- a fixed step budget
+- a grader that produces a score in `[0.0, 1.0]`
 
-## Action Space
+The environment follows the standard OpenEnv shape:
+- typed action model
+- typed observation model
+- typed state model
+- `reset()`
+- `step()`
+- `state()`
 
-The environment exposes one typed action model: `HeatShieldAction`.
+## Action model
+
+The environment exposes one action type: `HeatShieldAction`.
 
 Fields:
 - `action_type`: `inspect`, `activate_center`, `dispatch_resource`, `broadcast_alert`, `finalize`
 - `target_id`: district id, facility id, or `mission` for finalization
 - `resource_type`: `cooling_bus`, `water_truck`, `medical_team`, `generator`
-- `quantity`: integer units for dispatch actions
-- `message`: alert text or final summary
+- `quantity`: units to dispatch
+- `message`: alert copy or final summary
 
-## Observation Space
+## Observation and state
 
-`HeatShieldObservation` includes:
-- mission metadata: task id, title, difficulty, mission brief, turns remaining
-- district snapshots: population, vulnerability, unmet relief, outage flag, alert requirement
-- facility snapshots: activation status, capacity, generator requirement
-- resource inventory: remaining units and relief impact per unit
-- inspection log and action history
-- last event string
-- recommended next actions
-- grader summary and detailed score breakdown
+`HeatShieldObservation` returns the public situation picture plus the immediate
+result of the last action. It includes:
+- task metadata and step budget
+- district snapshots
+- facility snapshots
+- remaining resources
+- action history and inspection log
+- score breakdown
+- recommendation hints
+- transport metadata used by the baseline policy
 
-## Reward Function
+`HeatShieldState` is the more compact internal progress view:
+- active centers
+- inspected targets
+- resources already committed
+- current score
+- invalid action count
+- finalized/not finalized
 
-The reward is the non-negative improvement in normalized mission score after each action.
+## Reward and grading
 
-Mission score components:
-- `0.55 * relief_score`
-- `0.20 * facility_score`
-- `0.15 * alert_score`
-- `0.10 * intel_score`
-- minus invalid-action penalties
+The mission score is normalized to `[0.0, 1.0]`. It combines:
+- district relief coverage
+- critical facility activation
+- alert coverage
+- priority intel coverage
+- penalties for invalid actions
 
-This gives useful dense feedback while keeping transport-facing rewards in `[0.0, 1.0]`:
-- inspecting priority intel helps
-- activating the right centers helps more
-- dispatching generators before blocked facilities matters
-- targeted alerts close coverage gaps
-- invalid or impossible actions reduce the underlying mission score and future upside
+The per-step reward is the non-negative improvement in that mission score. That
+keeps rewards bounded for validators while still giving dense feedback.
 
-## Project Layout
+Invalid actions do not produce negative step rewards, but they still reduce the
+underlying mission score through the grader penalty.
+
+## Repository layout
 
 ```text
 .
@@ -95,7 +114,7 @@ This gives useful dense feedback while keeping transport-facing rewards in `[0.0
 `-- README.md
 ```
 
-## Local Setup
+## Local setup
 
 ```bash
 python -m venv .venv
@@ -103,55 +122,58 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-Run the server locally:
+Run the server:
 
 ```bash
 python -m server.app
 ```
 
-Run the smoke tests:
+Run tests:
 
 ```bash
 pytest
 ```
 
-Validate the repo structure:
+Run OpenEnv validation:
 
 ```bash
 openenv validate .
 ```
 
-Select a task explicitly during local debugging:
+If you want to reset a client directly into a specific task while debugging:
 
 ```python
 result = await env.reset(task_id="cascade_hard")
 ```
 
-For plain HTTP debugging, call `POST /reset` with an optional `task_id` and
-reuse the returned `X-OpenEnv-Session-Id` header on `/step` and `/state`.
-`POST /step` accepts either a raw `HeatShieldAction` JSON body or
-`{"action": {...}}`.
+For plain HTTP debugging:
+- call `POST /reset` first
+- keep the returned `X-OpenEnv-Session-Id` header
+- send that header on `/step` and `/state`
+- `/step` accepts either raw `HeatShieldAction` JSON or `{"action": {...}}`
 
-## Docker Build
+## Docker
+
+Build locally with:
 
 ```bash
 docker build -t heatshield_env-env:latest -f server/Dockerfile .
 ```
 
-## Baseline Inference
+## Baseline inference
 
-The baseline script is intentionally named `inference.py` and uses the OpenAI client with the required environment variables.
+The submission script is `inference.py`.
 
-Required variables:
+It supports the required environment variables:
 - `API_BASE_URL`
 - `MODEL_NAME`
 - `HF_TOKEN`
 
 Optional:
-- `LOCAL_IMAGE_NAME` if you want to override the local Docker image name
-- `USE_LLM=true` if you want to let the baseline query the model instead of using the deterministic task playbook
+- `LOCAL_IMAGE_NAME`
+- `USE_LLM=true`
 
-A template is included in `.env.example`.
+`.env.example` is included as a template.
 
 Example:
 
@@ -163,31 +185,37 @@ export LOCAL_IMAGE_NAME="heatshield_env-env:latest"
 python inference.py
 ```
 
-By default the baseline uses a deterministic task playbook so scores are reproducible even without an API token. Set `USE_LLM=true` to enable model-guided actions.
+By default the baseline uses deterministic per-task playbooks so the run is
+reproducible even without an API token. If `USE_LLM=true`, the script can ask
+the model for actions using the OpenAI client.
 
-Structured stdout format:
+Expected stdout format:
 - `[START] task=<task_name> env=<benchmark> model=<model_name>`
 - `[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>`
 - `[END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...>`
 
-## Hugging Face Spaces Deployment
+## Deployment
 
-You can deploy as a Docker Space:
+This repo is set up to deploy as a Docker Space:
 
 ```bash
 openenv push
 ```
 
-The resulting Space exposes:
-- `/web` for the interactive UI
-- `/docs` for the API schema
-- `/health` for container health checks
-- `/ws` for persistent OpenEnv sessions
+Useful endpoints after deployment:
+- `/web`
+- `/docs`
+- `/health`
+- `/ws`
 
-## Why This Is Hackathon-Ready
+## Notes
 
-- Real-world domain: heatwave emergency operations, not a game.
-- Full OpenEnv spec: typed models plus `reset()`, `step()`, and `state()`.
-- Three graded tasks with deterministic scoring.
-- Baseline inference script with required structured logs.
-- Dockerfile, README, local validator helper, and test coverage.
+A few implementation choices are intentional:
+- the baseline is deterministic first, model-assisted second
+- HTTP routes are stateful for easier debugging, even though the main client path is WebSocket
+- the hard task is tuned to be beatable, but not by random play
+
+If you are reading this for the hackathon submission, the fastest sanity check is:
+- run `pytest`
+- run `openenv validate .`
+- run `python inference.py` in an environment where Docker is available
