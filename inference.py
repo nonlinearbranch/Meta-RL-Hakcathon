@@ -19,7 +19,7 @@ from heatshield_env.scenario_data import get_task
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN"))
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 BENCHMARK = "heatshield_env"
@@ -455,7 +455,7 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
 
 
 async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOKEN and USE_LLM else None
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY and USE_LLM else None
     for task_id in get_task_ids():
         await run_task(task_id, client)
 
