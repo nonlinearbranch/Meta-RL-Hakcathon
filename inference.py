@@ -25,7 +25,7 @@ LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 BENCHMARK = "heatshield_env"
 MAX_MODEL_TOKENS = 480
 TEMPERATURE = 0.2
-USE_LLM = os.getenv("USE_LLM", "false").lower() in {"1", "true", "yes"}
+USE_LLM = os.getenv("USE_LLM", "true").lower() in {"1", "true", "yes"}
 
 
 SYSTEM_PROMPT = """
