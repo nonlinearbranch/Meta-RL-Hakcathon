@@ -17,9 +17,6 @@ from heatshield_env import HeatShieldAction, HeatShieldEnv, get_task_ids
 from heatshield_env.scenario_data import get_task
 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("API_KEY", os.getenv("HF_TOKEN"))
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 BENCHMARK = "heatshield_env"
@@ -158,8 +155,8 @@ def stderr(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
-def log_start(task: str, env: str, model: str) -> None:
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+def log_start(task: str, env: str, model_name: str) -> None:
+    print(f"[START] task={task} env={env} model={model_name}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
@@ -376,7 +373,7 @@ def call_model(client: Optional[OpenAI], observation) -> Optional[HeatShieldActi
 
     try:
         completion = client.chat.completions.create(
-            model=MODEL_NAME,
+            model=os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct"),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": build_prompt(observation)},
@@ -418,7 +415,7 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
     steps_taken = 0
     success = False
 
-    log_start(task_id, BENCHMARK, MODEL_NAME)
+    log_start(task_id, BENCHMARK, os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct"))
     try:
         env = await HeatShieldEnv.from_docker_image(
             image_name,
@@ -455,7 +452,15 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
 
 
 async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY and USE_LLM else None
+    if "API_BASE_URL" in os.environ and "API_KEY" in os.environ:
+        client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
+    else:
+        # Fallback for local testing when specific HF proxy is missing
+        client = OpenAI(
+            base_url=os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"),
+            api_key=os.environ.get("API_KEY", os.environ.get("HF_TOKEN"))
+        ) if USE_LLM else None
+        
     for task_id in get_task_ids():
         await run_task(task_id, client)
 
