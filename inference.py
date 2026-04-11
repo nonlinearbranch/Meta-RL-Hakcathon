@@ -417,39 +417,35 @@ async def run_task(task_id: str) -> None:
     success = False
 
     log_start(task_id, BENCHMARK, os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct"))
-    try:
-        env = await HeatShieldEnv.from_docker_image(
-            image_name,
-            env_vars={"HEATSHIELD_TASK_ID": task_id},
-        )
-        result = await env.reset()
+    env = await HeatShieldEnv.from_docker_image(
+        image_name,
+        env_vars={"HEATSHIELD_TASK_ID": task_id},
+    )
+    result = await env.reset()
+    observation = result.observation
+    threshold = get_task(task_id).success_threshold
+
+    while not result.done and observation.turns_remaining > 0:
+        steps_taken += 1
+        action = call_model(observation)
+        result = await env.step(action)
         observation = result.observation
-        threshold = get_task(task_id).success_threshold
+        reward = float(result.reward or 0.0)
+        rewards.append(reward)
+        error = (observation.metadata or {}).get("last_action_error")
+        log_step(
+            steps_taken,
+            format_action(action),
+            reward,
+            result.done,
+            error,
+        )
 
-        while not result.done and observation.turns_remaining > 0:
-            steps_taken += 1
-            action = call_model(observation)
-            result = await env.step(action)
-            observation = result.observation
-            reward = float(result.reward or 0.0)
-            rewards.append(reward)
-            error = (observation.metadata or {}).get("last_action_error")
-            log_step(
-                steps_taken,
-                format_action(action),
-                reward,
-                result.done,
-                error,
-            )
+    score = float(observation.score_breakdown.total_score)
+    success = score >= threshold
 
-        score = float(observation.score_breakdown.total_score)
-        success = score >= threshold
-    except Exception as exc:  # pragma: no cover - runtime dependent
-        stderr(f"Task {task_id} failed: {exc}")
-    finally:
-        if env is not None:
-            await env.close()
-        log_end(success, steps_taken, score, rewards)
+    await env.close()
+    log_end(success, steps_taken, score, rewards)
 
 
 async def main() -> None:
