@@ -24,7 +24,7 @@ LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 BENCHMARK = "heatshield_env"
 MAX_MODEL_TOKENS = 480
 TEMPERATURE = 0.2
-USE_LLM = os.getenv("USE_LLM", "true").lower() in {"1", "true", "yes"}
+
 
 
 SYSTEM_PROMPT = """
@@ -370,17 +370,11 @@ def validate_model_action(payload: Dict, observation) -> Optional[HeatShieldActi
 
 
 def call_model(observation) -> Optional[HeatShieldAction]:
-    if not USE_LLM:
-        return None
-
-    # Late-binding initialization so proxy injections post-import are safely captured
-    try:
-        client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
-    except KeyError:
-        client = OpenAI(
-            base_url=os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"),
-            api_key=os.environ.get("API_KEY", os.environ.get("HF_TOKEN"))
-        )
+    # Late-binding strict execution required by Phase 2 Evaluator
+    client = OpenAI(
+        base_url=os.environ["API_BASE_URL"],
+        api_key=os.environ["API_KEY"]
+    )
 
     completion = client.chat.completions.create(
         model=os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct"),
@@ -434,7 +428,7 @@ async def run_task(task_id: str) -> None:
 
         while not result.done and observation.turns_remaining > 0:
             steps_taken += 1
-            action = call_model(observation) or heuristic_action(observation)
+            action = call_model(observation)
             result = await env.step(action)
             observation = result.observation
             reward = float(result.reward or 0.0)
