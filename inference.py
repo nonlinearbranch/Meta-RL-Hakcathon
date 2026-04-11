@@ -19,15 +19,6 @@ from heatshield_env.scenario_data import get_task
 
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
-# Force strict instantiation matching precisely what the Phase 2 evaluator expects.
-# (We capture KeyErrors just so this file is still runnable locally where the evaluator proxy is missing)
-try:
-    client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
-except KeyError:
-    client = OpenAI(
-        base_url=os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"),
-        api_key=os.environ.get("API_KEY", os.environ.get("HF_TOKEN"))
-    ) if USE_LLM else None
 
 
 BENCHMARK = "heatshield_env"
@@ -378,9 +369,18 @@ def validate_model_action(payload: Dict, observation) -> Optional[HeatShieldActi
         return None
 
 
-def call_model(client: Optional[OpenAI], observation) -> Optional[HeatShieldAction]:
-    if client is None:
+def call_model(observation) -> Optional[HeatShieldAction]:
+    if not USE_LLM:
         return None
+
+    # Late-binding initialization so proxy injections post-import are safely captured
+    try:
+        client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
+    except KeyError:
+        client = OpenAI(
+            base_url=os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1"),
+            api_key=os.environ.get("API_KEY", os.environ.get("HF_TOKEN"))
+        )
 
     completion = client.chat.completions.create(
         model=os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct"),
@@ -414,7 +414,7 @@ def format_action(action: HeatShieldAction) -> str:
     return f"{action.action_type}(target_id={action.target_id})"
 
 
-async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
+async def run_task(task_id: str) -> None:
     image_name = LOCAL_IMAGE_NAME or "heatshield_env-env:latest"
     env = None
     rewards: List[float] = []
@@ -434,7 +434,7 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
 
         while not result.done and observation.turns_remaining > 0:
             steps_taken += 1
-            action = call_model(client, observation) or heuristic_action(observation)
+            action = call_model(observation) or heuristic_action(observation)
             result = await env.step(action)
             observation = result.observation
             reward = float(result.reward or 0.0)
@@ -460,7 +460,7 @@ async def run_task(task_id: str, client: Optional[OpenAI]) -> None:
 
 async def main() -> None:
     for task_id in get_task_ids():
-        await run_task(task_id, client)
+        await run_task(task_id)
 
 
 if __name__ == "__main__":
